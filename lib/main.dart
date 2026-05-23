@@ -1,11 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'models/post_model.dart';
 import 'services/post_service.dart';
 import 'models/photo_model.dart';
 import 'services/photo_service.dart';
+import 'provider/post_provider.dart';
+import 'provider/photo_provider.dart';
+
+late Future<List<PostModel>> FuturePosts;
 
 void main() {
-  runApp(MyApp());
+  FuturePosts = PostService.getPosts();
+
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => PostProvider()),
+        ChangeNotifierProvider(create: (_) => PhotoProvider()), // 🔥 tambahan
+      ],
+      child: MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -26,10 +41,7 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int currentIndex = 0;
 
-  final List<Widget> pages = [
-    PostPage(),
-    GalleryPage(),
-  ];
+  final List<Widget> pages = [PostPage(), GalleryPage()];
 
   void onTap(int index) {
     setState(() {
@@ -54,7 +66,7 @@ class _MainNavigationState extends State<MainNavigation> {
               BoxShadow(
                 blurRadius: 20,
                 color: Colors.black.withOpacity(0.2),
-              )
+              ),
             ],
           ),
           child: Row(
@@ -63,18 +75,14 @@ class _MainNavigationState extends State<MainNavigation> {
               IconButton(
                 icon: Icon(
                   Icons.home,
-                  color: currentIndex == 0
-                      ? Colors.blue
-                      : Colors.grey,
+                  color: currentIndex == 0 ? Colors.blue : Colors.grey,
                 ),
                 onPressed: () => onTap(0),
               ),
               IconButton(
                 icon: Icon(
                   Icons.image,
-                  color: currentIndex == 1
-                      ? Colors.blue
-                      : Colors.grey,
+                  color: currentIndex == 1 ? Colors.blue : Colors.grey,
                 ),
                 onPressed: () => onTap(1),
               ),
@@ -92,12 +100,13 @@ class PostPage extends StatefulWidget {
 }
 
 class _PostPageState extends State<PostPage> {
-  late Future<List<PostModel>> futurePosts;
 
   @override
   void initState() {
     super.initState();
-    futurePosts = PostService.getPosts();
+    Future.microtask(() {
+      context.read<PostProvider>().getPosts();
+    });
   }
 
   @override
@@ -108,13 +117,13 @@ class _PostPageState extends State<PostPage> {
         backgroundColor: Colors.pinkAccent,
       ),
       body: FutureBuilder<List<PostModel>>(
-        future: futurePosts,
+        future: FuturePosts,
         builder: (context, snapshot) {
           if (snapshot.hasData) {
             final posts = snapshot.data!;
 
             return ListView.builder(
-              padding: EdgeInsets.all(12), // 🔥 padding luar
+              padding: EdgeInsets.all(12),
               itemCount: posts.length,
               itemBuilder: (context, index) {
                 final post = posts[index];
@@ -160,73 +169,75 @@ class GalleryPage extends StatefulWidget {
 }
 
 class _GalleryPageState extends State<GalleryPage> {
-  late Future<List<PhotoModel>> futurePhotos;
 
   @override
   void initState() {
     super.initState();
-    futurePhotos = PhotoService.getPhotos();
+
+    Future.microtask(() {
+      context.read<PhotoProvider>().fetchPhotos();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<PhotoProvider>();
+
     return Scaffold(
       appBar: AppBar(
         title: Text("Daftar Foto"),
         backgroundColor: Colors.cyanAccent,
       ),
-      body: FutureBuilder<List<PhotoModel>>(
-        future: futurePhotos,
-        builder: (context, snapshot) {
-          if (snapshot.hasData) {
-            final photos = snapshot.data!;
-
-            return ListView.builder(
-              padding: EdgeInsets.all(12),
-              itemCount: photos.length,
-              itemBuilder: (context, index) {
-                final photo = photos[index];
-
-                return Card(
-                  margin: EdgeInsets.only(bottom: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.all(10),
-                        child: Text(
-                          photo.author,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-
-                      AspectRatio(
-                        aspectRatio: photo.width / photo.height,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.vertical(
-                            bottom: Radius.circular(12),
-                          ),
-                          child: Image.network(
-                            photo.downloadUrl,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            );
-          } else if (snapshot.hasError) {
-            return Center(child: Text("Error"));
-          } else {
+      body: Builder(
+        builder: (_) {
+          if (provider.isLoading) {
             return Center(child: CircularProgressIndicator());
           }
+
+          if (provider.errorMessage.isNotEmpty) {
+            return Center(child: Text(provider.errorMessage));
+          }
+
+          final photos = provider.photos;
+
+          return ListView.builder(
+            padding: EdgeInsets.all(12),
+            itemCount: photos.length,
+            itemBuilder: (context, index) {
+              final photo = photos[index];
+
+              return Card(
+                margin: EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Text(
+                        photo.author,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    AspectRatio(
+                      aspectRatio: photo.width / photo.height,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.vertical(
+                          bottom: Radius.circular(12),
+                        ),
+                        child: Image.network(
+                          photo.downloadUrl,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
         },
       ),
     );
